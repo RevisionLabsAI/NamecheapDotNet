@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Xml.Linq;
 using System.Xml.Serialization;
@@ -38,9 +39,29 @@ namespace NameCheap
                    .Select(o => new DomainCheckResult()
                    {
                        DomainName = o.Attribute("Domain").Value,
-                       IsAvailable = o.Attribute("Available").Value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                       IsAvailable = o.Attribute("Available").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
+                       IsPremiumName = o.Attribute("IsPremiumName").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
+                       IcannFee = double.TryParse(o.Attribute("IcannFee").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee) ? fee : 0,
+                       PremiumRegistrationPrice = double.TryParse(o.Attribute("PremiumRegistrationPrice").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee2) ? fee2 : 0
                    }).ToArray();
         }
+        
+        /*public DomainPricingResult GetPricing(params string[] domains)
+        {
+            XDocument doc = new Query(_params)
+                .AddParameter("DomainList", string.Join(",", domains))
+                .Execute("namecheap.users.getPricing");
+
+            return doc.Root.Element(_ns + "CommandResponse").Elements()
+                .Select(o => new DomainPricingResult()
+                {
+                    DomainName = o.Attribute("Domain").Value,
+                    IsAvailable = o.Attribute("Available").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
+                    IsPremiumName = o.Attribute("IsPremiumName").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
+                    IcannFee = double.TryParse(o.Attribute("IcannFee").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee) ? fee : 0,
+                    PremiumRegistrationPrice = double.TryParse(o.Attribute("PremiumRegistrationPrice").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee2) ? fee2 : 0
+                }).ToArray();
+        }*/
 
         /// <summary>
         /// Registers a new domain.
