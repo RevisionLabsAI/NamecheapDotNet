@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Globalization;
 using System.Linq;
 using System.Xml.Linq;
@@ -46,22 +47,72 @@ namespace NameCheap
                    }).ToArray();
         }
         
-        /*public DomainPricingResult GetPricing(params string[] domains)
+        public DomainPricingResult GetPricing(
+            string productType = "DOMAIN", 
+            string productCategory = null,
+            string actionName = null,
+            string productName = null)
         {
-            XDocument doc = new Query(_params)
-                .AddParameter("DomainList", string.Join(",", domains))
-                .Execute("namecheap.users.getPricing");
+            Console.WriteLine("Start");
+            Query query = new Query(_params)
+                .AddParameter("ProductType", productType);
+            Console.WriteLine("Query created");
+            
+            if (string.IsNullOrEmpty(productCategory) is false)
+                query.AddParameter("ProductCategory", productCategory);
 
-            return doc.Root.Element(_ns + "CommandResponse").Elements()
-                .Select(o => new DomainPricingResult()
+            if (string.IsNullOrEmpty(actionName) is false)
+                query.AddParameter("ActionName", actionName);
+
+            if (string.IsNullOrEmpty(productName) is false)
+                query.AddParameter("ProductName", productName);
+            
+            XDocument doc = query.Execute("namecheap.users.getPricing");
+            Console.WriteLine("Executed");
+            
+            var userGetPricingResult = doc.Root.Element(_ns + "CommandResponse")
+                .Element(_ns + "UserGetPricingResult");
+            
+            var result = new DomainPricingResult
+            {
+                ProductType = userGetPricingResult.Element(_ns + "ProductType").Attribute("Name").Value
+            };
+
+            foreach (var productCategoryElement in userGetPricingResult.Element(_ns + "ProductType").Elements(_ns + "ProductCategory"))
+            {
+                var responseCategory = new ProductAction
                 {
-                    DomainName = o.Attribute("Domain").Value,
-                    IsAvailable = o.Attribute("Available").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
-                    IsPremiumName = o.Attribute("IsPremiumName").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
-                    IcannFee = double.TryParse(o.Attribute("IcannFee").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee) ? fee : 0,
-                    PremiumRegistrationPrice = double.TryParse(o.Attribute("PremiumRegistrationPrice").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee2) ? fee2 : 0
-                }).ToArray();
-        }*/
+                    ActionName = productCategoryElement.Attribute("Name").Value
+                };
+
+                foreach (var productElement in productCategoryElement.Elements(_ns + "Product"))
+                {
+                    var product = new Product
+                    {
+                        ProductName = productElement.Attribute("Name").Value
+                    };
+
+                    foreach (var priceElement in productElement.Elements(_ns + "Price"))
+                    {
+                        product.Prices.Add(new PricingDetails
+                        {
+                            Duration = int.Parse(priceElement.Attribute("Duration").Value),
+                            DurationType = priceElement.Attribute("DurationType").Value,
+                            Price = double.Parse(priceElement.Attribute("Price").Value),
+                            RegularPrice = double.Parse(priceElement.Attribute("RegularPrice").Value),
+                            YourPrice = double.Parse(priceElement.Attribute("YourPrice").Value),
+                            Currency = priceElement.Attribute("Currency").Value
+                        });
+                    }
+
+                    responseCategory.Products.Add(product);
+                }
+
+                result.ProductActions.Add(responseCategory);
+            }
+
+            return result;
+        }
 
         /// <summary>
         /// Registers a new domain.
