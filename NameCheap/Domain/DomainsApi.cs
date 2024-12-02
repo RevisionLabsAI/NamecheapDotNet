@@ -53,10 +53,8 @@ namespace NameCheap
             string actionName = null,
             string productName = null)
         {
-            Console.WriteLine("Start");
             Query query = new Query(_params)
                 .AddParameter("ProductType", productType);
-            Console.WriteLine("Query created");
             
             if (string.IsNullOrEmpty(productCategory) is false)
                 query.AddParameter("ProductCategory", productCategory);
@@ -68,7 +66,6 @@ namespace NameCheap
                 query.AddParameter("ProductName", productName);
             
             XDocument doc = query.Execute("namecheap.users.getPricing");
-            Console.WriteLine("Executed");
             
             var userGetPricingResult = doc.Root.Element(_ns + "CommandResponse")
                 .Element(_ns + "UserGetPricingResult");
