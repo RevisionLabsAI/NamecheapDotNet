@@ -1,6 +1,6 @@
 ﻿namespace NameCheap
 {
-    internal class GlobalParameters
+    public class GlobalParameters
     {
         public string ApiUser { get; set; }
         public string ApiKey { get; set; }
