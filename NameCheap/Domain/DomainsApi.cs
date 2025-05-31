@@ -72,6 +72,7 @@ namespace NameCheap
             
             var result = new DomainPricingResult
             {
+                TimeStamp = DateTime.UtcNow,
                 ProductType = userGetPricingResult.Element(_ns + "ProductType").Attribute("Name").Value
             };
 

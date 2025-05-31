@@ -27,6 +27,7 @@ namespace NameCheap
 
     public class DomainPricingResult
     {
+        public DateTime TimeStamp { get; set; }
         public string ProductType { get; set; }
         public List<ProductAction> ProductActions { get; set; } = new List<ProductAction>();
     }
