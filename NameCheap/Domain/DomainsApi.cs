@@ -32,19 +32,27 @@ namespace NameCheap
         /// </exception>
         public DomainCheckResult[] AreAvailable(params string[] domains)
         {
-            XDocument doc = new Query(_params)
-                .AddParameter("DomainList", string.Join(",", domains))
-                .Execute("namecheap.domains.check");
-
-            return doc.Root.Element(_ns + "CommandResponse").Elements()
-                   .Select(o => new DomainCheckResult()
-                   {
-                       DomainName = o.Attribute("Domain").Value,
-                       IsAvailable = o.Attribute("Available").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
-                       IsPremiumName = o.Attribute("IsPremiumName").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
-                       IcannFee = double.TryParse(o.Attribute("IcannFee").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee) ? fee : 0,
-                       PremiumRegistrationPrice = double.TryParse(o.Attribute("PremiumRegistrationPrice").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee2) ? fee2 : 0
-                   }).ToArray();
+            try
+            {
+                XDocument doc = new Query(_params)
+                    .AddParameter("DomainList", string.Join(",", domains))
+                    .Execute("namecheap.domains.check");
+                
+                return doc.Root.Element(_ns + "CommandResponse").Elements()
+                    .Select(o => new DomainCheckResult()
+                    {
+                        DomainName = o.Attribute("Domain").Value,
+                        IsAvailable = o.Attribute("Available").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
+                        IsPremiumName = o.Attribute("IsPremiumName").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
+                        IcannFee = double.TryParse(o.Attribute("IcannFee").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee) ? fee : 0,
+                        PremiumRegistrationPrice = double.TryParse(o.Attribute("PremiumRegistrationPrice").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee2) ? fee2 : 0
+                    }).ToArray();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.AreAvailable: EXCEPTION: {ex.Message}");
+                return null;
+            }
         }
         
         public DomainPricingResult GetPricing(
