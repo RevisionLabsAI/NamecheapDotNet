@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Xml.Linq;
 using System.Xml.Serialization;
+using System.Text.RegularExpressions;
 
 namespace NameCheap
 {
@@ -32,27 +33,116 @@ namespace NameCheap
         /// </exception>
         public DomainCheckResult[] AreAvailable(params string[] domains)
         {
+            // Input validation
+            if (domains == null || domains.Length == 0)
+            {
+                return new DomainCheckResult[0];
+            }
+
+            if (domains.Length > 500)
+            {
+                throw new ArgumentException("Only 500 domains are allowed in a single check command", nameof(domains));
+            }
+
+            // Validate domain names
+            var validDomains = domains.Where(IsValidDomainName).ToArray();
+            if (validDomains.Length != domains.Length)
+            {
+                Console.WriteLine($"Warning: {domains.Length - validDomains.Length} invalid domain names were filtered out");
+            }
+
+            if (validDomains.Length == 0)
+            {
+                return new DomainCheckResult[0];
+            }
+
             try
             {
                 XDocument doc = new Query(_params)
-                    .AddParameter("DomainList", string.Join(",", domains))
+                    .AddParameter("DomainList", string.Join(",", validDomains))
                     .Execute("namecheap.domains.check");
                 
-                return doc.Root.Element(_ns + "CommandResponse").Elements()
-                    .Select(o => new DomainCheckResult()
-                    {
-                        DomainName = o.Attribute("Domain").Value,
-                        IsAvailable = o.Attribute("Available").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
-                        IsPremiumName = o.Attribute("IsPremiumName").Value.Equals("true", StringComparison.OrdinalIgnoreCase),
-                        IcannFee = double.TryParse(o.Attribute("IcannFee").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee) ? fee : 0,
-                        PremiumRegistrationPrice = double.TryParse(o.Attribute("PremiumRegistrationPrice").Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double fee2) ? fee2 : 0
-                    }).ToArray();
+                var commandResponse = doc.Root?.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                return commandResponse.Elements()
+                    .Select(ParseDomainCheckResult)
+                    .Where(result => result != null)
+                    .ToArray();
+            }
+            catch (System.Xml.XmlException xmlEx)
+            {
+                Console.WriteLine($"DomainsApi.AreAvailable: XML EXCEPTION: {xmlEx.Message}");
+                Console.WriteLine("This usually indicates invalid characters in the API response.");
+                throw new ApplicationException("Failed to parse API response due to invalid XML", xmlEx);
+            }
+            catch (ApplicationException)
+            {
+                // Re-throw application exceptions as-is
+                throw;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"DomainsApi.AreAvailable: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error checking domain availability: {ex.Message}", ex);
+            }
+        }
+
+        private DomainCheckResult ParseDomainCheckResult(XElement element)
+        {
+            try
+            {
+                return new DomainCheckResult()
+                {
+                    DomainName = GetAttributeValue(element, "Domain"),
+                    IsAvailable = GetBooleanAttributeValue(element, "Available"),
+                    IsPremiumName = GetBooleanAttributeValue(element, "IsPremiumName"),
+                    IcannFee = GetDoubleAttributeValue(element, "IcannFee"),
+                    PremiumRegistrationPrice = GetDoubleAttributeValue(element, "PremiumRegistrationPrice")
+                };
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error parsing domain check result: {ex.Message}");
                 return null;
             }
+        }
+
+        private string GetAttributeValue(XElement element, string attributeName, string defaultValue = "")
+        {
+            return element?.Attribute(attributeName)?.Value ?? defaultValue;
+        }
+
+        private bool GetBooleanAttributeValue(XElement element, string attributeName, bool defaultValue = false)
+        {
+            string value = GetAttributeValue(element, attributeName);
+            return !string.IsNullOrEmpty(value) && 
+                   value.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private double GetDoubleAttributeValue(XElement element, string attributeName, double defaultValue = 0.0)
+        {
+            string value = GetAttributeValue(element, attributeName);
+            return double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out double result) 
+                ? result 
+                : defaultValue;
+        }
+
+        private static bool IsValidDomainName(string domain)
+        {
+            if (string.IsNullOrWhiteSpace(domain))
+                return false;
+
+            // Basic domain validation
+            if (domain.Length > 253 || domain.Length < 3)
+                return false;
+
+            // Check for valid characters and structure
+            var domainRegex = new Regex(@"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$");
+            return domainRegex.IsMatch(domain);
         }
         
         public DomainPricingResult GetPricing(
