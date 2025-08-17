@@ -39,9 +39,9 @@ namespace NameCheap
                 return new DomainCheckResult[0];
             }
 
-            if (domains.Length > 500)
+            if (domains.Length > 50)
             {
-                throw new ArgumentException("Only 500 domains are allowed in a single check command", nameof(domains));
+                throw new ArgumentException("Only 50 domains are allowed in a single check command", nameof(domains));
             }
 
             // Validate domain names
