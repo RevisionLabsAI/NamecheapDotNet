@@ -4,6 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Xml.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NameCheap
 {
@@ -27,25 +30,54 @@ namespace NameCheap
             return this;
         }
 
-        internal XDocument Execute(string command)
+        private string BuildUrl(string command)
         {
             StringBuilder url = new StringBuilder();
             url.Append(_globals.IsSandBox ? "https://api.sandbox.namecheap.com/xml.response?" : "https://api.namecheap.com/xml.response?");
-            url.Append("Command=").Append(command)
-            .Append("&ApiUser=").Append(_globals.ApiUser)
-            .Append("&UserName=").Append(_globals.UserName)
-            .Append("&ApiKey=").Append(_globals.ApiKey)
-            .Append("&ClientIp=").Append(_globals.CLientIp);
+            url.Append("Command=").Append(Uri.EscapeDataString(command))
+               .Append("&ApiUser=").Append(Uri.EscapeDataString(_globals.ApiUser))
+               .Append("&UserName=").Append(Uri.EscapeDataString(_globals.UserName))
+               .Append("&ApiKey=").Append(Uri.EscapeDataString(_globals.ApiKey))
+               .Append("&ClientIp=").Append(Uri.EscapeDataString(_globals.CLientIp));
 
             foreach (KeyValuePair<string, string> param in _parameters)
-                url.Append("&").Append(param.Key).Append("=").Append(param.Value);
+            {
+                url.Append("&")
+                   .Append(Uri.EscapeDataString(param.Key))
+                   .Append("=")
+                   .Append(Uri.EscapeDataString(param.Value ?? string.Empty));
+            }
 
-            XDocument doc = XDocument.Parse(new WebClient().DownloadString(url.ToString()));
+            return url.ToString();
+        }
+
+        internal XDocument Execute(string command)
+        {
+            string url = BuildUrl(command);
+            XDocument doc = XDocument.Parse(new WebClient().DownloadString(url));
 
             if (doc.Root.Attribute("Status").Value.Equals("ERROR", StringComparison.OrdinalIgnoreCase))
                 throw new ApplicationException(string.Join(",", doc.Root.Element(_ns + "Errors").Elements(_ns + "Error").Select(o => o.Value).ToArray()));
             else
                 return doc;
+        }
+
+        internal async Task<XDocument> ExecuteAsync(string command, CancellationToken cancellationToken = default)
+        {
+            string url = BuildUrl(command);
+            using (var client = new HttpClient())
+            using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+            using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false))
+            {
+                response.EnsureSuccessStatusCode();
+                string xml = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                XDocument doc = XDocument.Parse(xml);
+
+                if (doc.Root.Attribute("Status").Value.Equals("ERROR", StringComparison.OrdinalIgnoreCase))
+                    throw new ApplicationException(string.Join(",", doc.Root.Element(_ns + "Errors").Elements(_ns + "Error").Select(o => o.Value).ToArray()));
+                else
+                    return doc;
+            }
         }
     }
 }

@@ -6,6 +6,8 @@ using System.Linq;
 using System.Xml.Linq;
 using System.Xml.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NameCheap
 {
@@ -33,10 +35,15 @@ namespace NameCheap
         /// </exception>
         public DomainCheckResult[] AreAvailable(params string[] domains)
         {
+            return AreAvailableAsync(domains).GetAwaiter().GetResult();
+        }
+
+        public async Task<DomainCheckResult[]> AreAvailableAsync(string[] domains, CancellationToken cancellationToken = default)
+        {
             // Input validation
             if (domains == null || domains.Length == 0)
             {
-                return new DomainCheckResult[0];
+                return Array.Empty<DomainCheckResult>();
             }
 
             if (domains.Length > 50)
@@ -53,15 +60,16 @@ namespace NameCheap
 
             if (validDomains.Length == 0)
             {
-                return new DomainCheckResult[0];
+                return Array.Empty<DomainCheckResult>();
             }
 
             try
             {
-                XDocument doc = new Query(_params)
+                XDocument doc = await new Query(_params)
                     .AddParameter("DomainList", string.Join(",", validDomains))
-                    .Execute("namecheap.domains.check");
-                
+                    .ExecuteAsync("namecheap.domains.check", cancellationToken)
+                    .ConfigureAwait(false);
+
                 var commandResponse = doc.Root?.Element(_ns + "CommandResponse");
                 if (commandResponse == null)
                 {
@@ -75,18 +83,17 @@ namespace NameCheap
             }
             catch (System.Xml.XmlException xmlEx)
             {
-                Console.WriteLine($"DomainsApi.AreAvailable: XML EXCEPTION: {xmlEx.Message}");
+                Console.WriteLine($"DomainsApi.AreAvailableAsync: XML EXCEPTION: {xmlEx.Message}");
                 Console.WriteLine("This usually indicates invalid characters in the API response.");
                 throw new ApplicationException("Failed to parse API response due to invalid XML", xmlEx);
             }
             catch (ApplicationException)
             {
-                // Re-throw application exceptions as-is
                 throw;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"DomainsApi.AreAvailable: EXCEPTION: {ex.Message}");
+                Console.WriteLine($"DomainsApi.AreAvailableAsync: EXCEPTION: {ex.Message}");
                 throw new ApplicationException($"Unexpected error checking domain availability: {ex.Message}", ex);
             }
         }
@@ -151,63 +158,7 @@ namespace NameCheap
             string actionName = null,
             string productName = null)
         {
-            Query query = new Query(_params)
-                .AddParameter("ProductType", productType);
-            
-            if (string.IsNullOrEmpty(productCategory) is false)
-                query.AddParameter("ProductCategory", productCategory);
-
-            if (string.IsNullOrEmpty(actionName) is false)
-                query.AddParameter("ActionName", actionName);
-
-            if (string.IsNullOrEmpty(productName) is false)
-                query.AddParameter("ProductName", productName);
-            
-            XDocument doc = query.Execute("namecheap.users.getPricing");
-            
-            var userGetPricingResult = doc.Root.Element(_ns + "CommandResponse")
-                .Element(_ns + "UserGetPricingResult");
-            
-            var result = new DomainPricingResult
-            {
-                TimeStamp = DateTime.UtcNow,
-                ProductType = userGetPricingResult.Element(_ns + "ProductType").Attribute("Name").Value
-            };
-
-            foreach (var productCategoryElement in userGetPricingResult.Element(_ns + "ProductType").Elements(_ns + "ProductCategory"))
-            {
-                var responseCategory = new ProductAction
-                {
-                    ActionName = productCategoryElement.Attribute("Name").Value
-                };
-
-                foreach (var productElement in productCategoryElement.Elements(_ns + "Product"))
-                {
-                    var product = new Product
-                    {
-                        ProductName = productElement.Attribute("Name").Value
-                    };
-
-                    foreach (var priceElement in productElement.Elements(_ns + "Price"))
-                    {
-                        product.Prices.Add(new PricingDetails
-                        {
-                            Duration = int.Parse(priceElement.Attribute("Duration").Value),
-                            DurationType = priceElement.Attribute("DurationType").Value,
-                            Price = double.Parse(priceElement.Attribute("Price").Value),
-                            RegularPrice = double.Parse(priceElement.Attribute("RegularPrice").Value),
-                            YourPrice = double.Parse(priceElement.Attribute("YourPrice").Value),
-                            Currency = priceElement.Attribute("Currency").Value
-                        });
-                    }
-
-                    responseCategory.Products.Add(product);
-                }
-
-                result.ProductActions.Add(responseCategory);
-            }
-
-            return result;
+            return GetPricingAsync(productType, productCategory, actionName, productName).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -245,19 +196,7 @@ namespace NameCheap
         /// </exception>
         public DomainCreateResult Create(DomainCreateRequest domain)
         {
-            var query = new Query(_params);
-
-            foreach (var item in GetNamesAndValuesFromProperties(domain))
-                query.AddParameter(item.Key, item.Value);
-
-            XDocument doc = query.Execute("namecheap.domains.create");
-            XElement result = doc.Root.Element(_ns + "CommandResponse").Element(_ns + "DomainCreateResult");
-
-            var serializer = new XmlSerializer(typeof(DomainCreateResult), _ns.NamespaceName);
-            using (var reader = result.CreateReader())
-            {
-                return (DomainCreateResult)serializer.Deserialize(reader);
-            }
+            return CreateAsync(domain).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -277,16 +216,7 @@ namespace NameCheap
         /// </exception>
         public DomainContactsResult GetContacts(string domain)
         {
-            XDocument doc = new Query(_params)
-              .AddParameter("DomainName", domain)
-              .Execute("namecheap.domains.getContacts");
-
-            var serializer = new XmlSerializer(typeof(DomainContactsResult), _ns.NamespaceName);
-
-            using (var reader = doc.Root.Element(_ns + "CommandResponse").Element(_ns + "DomainContactsResult").CreateReader())
-            {
-                return (DomainContactsResult)serializer.Deserialize(reader);
-            }
+            return GetContactsAsync(domain).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -301,21 +231,7 @@ namespace NameCheap
         /// </exception>
         public DomainInfoResult GetInfo(string domain)
         {
-            XDocument doc = new Query(_params)
-                .AddParameter("DomainName", domain)
-                .Execute("namecheap.domains.getInfo");
-
-            XElement root = doc.Root.Element(_ns + "CommandResponse").Element(_ns + "DomainGetInfoResult");
-
-            return new DomainInfoResult()
-            {
-                ID = int.Parse(root.Attribute("ID").Value),
-                OwnerName = root.Attribute("OwnerName").Value,
-                IsOwner = bool.Parse(root.Attribute("IsOwner").Value),
-                CreatedDate = root.Element(_ns + "DomainDetails").Element(_ns + "CreatedDate").Value.ParseNameCheapDate(),
-                ExpiredDate = root.Element(_ns + "DomainDetails").Element(_ns + "ExpiredDate").Value.ParseNameCheapDate(),
-                DnsProviderType = root.Element(_ns + "DnsDetails").Attribute("ProviderType").Value
-            };
+            return GetInfoAsync(domain).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -327,14 +243,7 @@ namespace NameCheap
         /// </exception>
         public DomainListResult GetList()
         {
-            XDocument doc = new Query(_params).Execute("namecheap.domains.getList");
-
-            var serializer = new XmlSerializer(typeof(DomainListResult), _ns.NamespaceName);
-
-            using (var reader = doc.Root.Element(_ns + "CommandResponse").CreateReader())
-            {
-                return (DomainListResult)serializer.Deserialize(reader);
-            }
+            return GetListAsync().GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -352,12 +261,7 @@ namespace NameCheap
         /// </exception>
         public bool GetRegistrarLock(string domain)
         {
-            XDocument doc = new Query(_params)
-                .AddParameter("DomainName", domain)
-                .Execute("namecheap.domains.getRegistrarLock");
-
-            XElement root = doc.Root.Element(_ns + "CommandResponse").Element(_ns + "DomainGetRegistrarLockResult");
-            return bool.Parse(root.Attribute("RegistrarLockStatus").Value);
+            return GetRegistrarLockAsync(domain).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -376,9 +280,7 @@ namespace NameCheap
         /// </exception>
         public void SetRegistrarLock(string domain)
         {
-            new Query(_params)
-                .AddParameter("DomainName", domain)
-                .Execute("namecheap.domains.setRegistrarLock");
+            SetRegistrarLockAsync(domain).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -397,10 +299,7 @@ namespace NameCheap
         /// </exception>
         public void SetRegistrarUnlock(string domain)
         {
-            new Query(_params)
-                .AddParameter("DomainName", domain)
-                .AddParameter("LockAction", "UNLOCK")
-                .Execute("namecheap.domains.setRegistrarLock");
+            SetRegistrarUnlockAsync(domain).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -413,14 +312,7 @@ namespace NameCheap
         /// </exception>
         public TldListResult GetTldList()
         {
-            XDocument doc = new Query(_params).Execute("namecheap.domains.getTldList");
-
-            var serializer = new XmlSerializer(typeof(TldListResult), _ns.NamespaceName);
-
-            using (var reader = doc.Root.Element(_ns + "CommandResponse").Element(_ns + "Tlds").CreateReader())
-            {
-                return (TldListResult)serializer.Deserialize(reader);
-            }
+            return GetTldListAsync().GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -452,17 +344,7 @@ namespace NameCheap
         /// </exception>
         public DomainRenewResult Renew(string domain, int years)
         {
-            XDocument doc = new Query(_params)
-             .AddParameter("DomainName", domain)
-             .AddParameter("Years", years.ToString())
-             .Execute("namecheap.domains.renew");
-
-            var serializer = new XmlSerializer(typeof(DomainRenewResult), _ns.NamespaceName);
-
-            using (var reader = doc.Root.Element(_ns + "CommandResponse").Element(_ns + "DomainRenewResult").CreateReader())
-            {
-                return (DomainRenewResult)serializer.Deserialize(reader);
-            }
+            return RenewAsync(domain, years).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -493,16 +375,7 @@ namespace NameCheap
         /// </exception>
         public DomainReactivateResult Reactivate(string domain)
         {
-            XDocument doc = new Query(_params)
-             .AddParameter("DomainName", domain)
-             .Execute("namecheap.domains.reActivate");
-
-            var serializer = new XmlSerializer(typeof(DomainReactivateResult), _ns.NamespaceName);
-
-            using (var reader = doc.Root.Element(_ns + "CommandResponse").Element(_ns + "DomainReactivateResult").CreateReader())
-            {
-                return (DomainReactivateResult)serializer.Deserialize(reader);
-            }
+            return ReactivateAsync(domain).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -532,37 +405,738 @@ namespace NameCheap
         /// </exception>
         public void SetContacts(DomainContactsRequest contacts)
         {
-            var query = new Query(_params);
-
-            foreach (var item in GetNamesAndValuesFromProperties(contacts))
-                query.AddParameter(item.Key, item.Value);
-
-            XDocument doc = query.Execute("namecheap.domains.setContacts");
+            SetContactsAsync(contacts).GetAwaiter().GetResult();
         }
 
         private Dictionary<string, string> GetNamesAndValuesFromProperties(object obj)
         {
             Dictionary<string, string> queryParams = new Dictionary<string, string>();
 
-            foreach (var property in obj.GetType().GetProperties())
+            if (obj == null)
             {
-                object value = property.GetValue(obj, null);
+                return queryParams;
+            }
 
-                if (value is ContactInformation)
+            try
+            {
+                foreach (System.Reflection.PropertyInfo property in obj.GetType().GetProperties())
                 {
-                    foreach (var cProperty in value.GetType().GetProperties())
-                    {
-                        var cValue = cProperty.GetValue(value, null);
+                    object value = property.GetValue(obj, null);
 
-                        if (cValue != null)
-                            queryParams.Add(property.Name + cProperty.Name, cValue.ToString());
+                    if (value is ContactInformation contactInformation)
+                    {
+                        foreach (System.Reflection.PropertyInfo cProperty in contactInformation.GetType().GetProperties())
+                        {
+                            object cValue = cProperty.GetValue(contactInformation, null);
+
+                            if (cValue != null)
+                            {
+                                queryParams.Add(property.Name + cProperty.Name, cValue.ToString());
+                            }
+                        }
+                    }
+                    else if (value != null)
+                    {
+                        queryParams.Add(property.Name, value.ToString());
                     }
                 }
-                else if (value != null)
-                    queryParams.Add(property.Name, value.ToString());
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"GetNamesAndValuesFromProperties error: {ex.Message}");
             }
 
             return queryParams;
+        }
+
+        // Async counterparts
+        public async Task<DomainPricingResult> GetPricingAsync(
+            string productType = "DOMAIN",
+            string productCategory = null,
+            string actionName = null,
+            string productName = null,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                Query query = new Query(_params)
+                    .AddParameter("ProductType", productType);
+
+                if (!string.IsNullOrEmpty(productCategory))
+                {
+                    query.AddParameter("ProductCategory", productCategory);
+                }
+
+                if (!string.IsNullOrEmpty(actionName))
+                {
+                    query.AddParameter("ActionName", actionName);
+                }
+
+                if (!string.IsNullOrEmpty(productName))
+                {
+                    query.AddParameter("ProductName", productName);
+                }
+
+                XDocument doc = await query.ExecuteAsync("namecheap.users.getPricing", cancellationToken).ConfigureAwait(false);
+                XElement root = doc.Root;
+                if (root == null)
+                {
+                    throw new ApplicationException("Invalid response: Root element is null");
+                }
+
+                XElement commandResponse = root.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                XElement userGetPricingResult = commandResponse.Element(_ns + "UserGetPricingResult");
+                if (userGetPricingResult == null)
+                {
+                    throw new ApplicationException("Invalid response structure: UserGetPricingResult element not found");
+                }
+
+                XElement productTypeElement = userGetPricingResult.Element(_ns + "ProductType");
+                if (productTypeElement == null)
+                {
+                    throw new ApplicationException("Invalid response structure: ProductType element not found");
+                }
+
+                XAttribute productTypeNameAttr = productTypeElement.Attribute("Name");
+                string productTypeName = productTypeNameAttr?.Value ?? string.Empty;
+
+                DomainPricingResult result = new DomainPricingResult
+                {
+                    TimeStamp = DateTime.UtcNow,
+                    ProductType = productTypeName
+                };
+
+                foreach (XElement productCategoryElement in productTypeElement.Elements(_ns + "ProductCategory"))
+                {
+                    XAttribute categoryNameAttr = productCategoryElement.Attribute("Name");
+                    string categoryName = categoryNameAttr?.Value ?? string.Empty;
+
+                    ProductAction responseCategory = new ProductAction
+                    {
+                        ActionName = categoryName
+                    };
+
+                    foreach (XElement productElement in productCategoryElement.Elements(_ns + "Product"))
+                    {
+                        XAttribute productNameAttr = productElement.Attribute("Name");
+                        string prodName = productNameAttr?.Value ?? string.Empty;
+
+                        Product product = new Product
+                        {
+                            ProductName = prodName
+                        };
+
+                        foreach (XElement priceElement in productElement.Elements(_ns + "Price"))
+                        {
+                            int duration;
+                            double price;
+                            double regularPrice;
+                            double yourPrice;
+                            XAttribute durationAttr = priceElement.Attribute("Duration");
+                            XAttribute durationTypeAttr = priceElement.Attribute("DurationType");
+                            XAttribute priceAttr = priceElement.Attribute("Price");
+                            XAttribute regularPriceAttr = priceElement.Attribute("RegularPrice");
+                            XAttribute yourPriceAttr = priceElement.Attribute("YourPrice");
+                            XAttribute currencyAttr = priceElement.Attribute("Currency");
+
+                            if (durationAttr == null || !int.TryParse(durationAttr.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out duration))
+                            {
+                                continue; // Skip malformed entry
+                            }
+
+                            if (priceAttr == null || !double.TryParse(priceAttr.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out price))
+                            {
+                                continue;
+                            }
+
+                            if (regularPriceAttr == null || !double.TryParse(regularPriceAttr.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out regularPrice))
+                            {
+                                continue;
+                            }
+
+                            if (yourPriceAttr == null || !double.TryParse(yourPriceAttr.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out yourPrice))
+                            {
+                                continue;
+                            }
+
+                            PricingDetails pricingDetails = new PricingDetails
+                            {
+                                Duration = duration,
+                                DurationType = durationTypeAttr?.Value ?? string.Empty,
+                                Price = price,
+                                RegularPrice = regularPrice,
+                                YourPrice = yourPrice,
+                                Currency = currencyAttr?.Value ?? string.Empty
+                            };
+
+                            product.Prices.Add(pricingDetails);
+                        }
+
+                        responseCategory.Products.Add(product);
+                    }
+
+                    result.ProductActions.Add(responseCategory);
+                }
+
+                return result;
+            }
+            catch (ApplicationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.GetPricingAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while getting pricing: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<DomainCreateResult> CreateAsync(DomainCreateRequest domain, CancellationToken cancellationToken = default)
+        {
+            if (domain == null)
+            {
+                throw new ArgumentNullException(nameof(domain));
+            }
+
+            try
+            {
+                Query query = new Query(_params);
+
+                foreach (KeyValuePair<string, string> item in GetNamesAndValuesFromProperties(domain))
+                {
+                    query.AddParameter(item.Key, item.Value);
+                }
+
+                XDocument doc = await query.ExecuteAsync("namecheap.domains.create", cancellationToken).ConfigureAwait(false);
+                XElement root = doc.Root;
+                if (root == null)
+                {
+                    throw new ApplicationException("Invalid response: Root element is null");
+                }
+
+                XElement commandResponse = root.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                XElement resultElement = commandResponse.Element(_ns + "DomainCreateResult");
+                if (resultElement == null)
+                {
+                    throw new ApplicationException("Invalid response structure: DomainCreateResult element not found");
+                }
+
+                XmlSerializer serializer = new XmlSerializer(typeof(DomainCreateResult), _ns.NamespaceName);
+                using (System.Xml.XmlReader reader = resultElement.CreateReader())
+                {
+                    object deserialized = serializer.Deserialize(reader);
+                    DomainCreateResult domainCreateResult = deserialized as DomainCreateResult;
+                    if (domainCreateResult == null)
+                    {
+                        throw new ApplicationException("Failed to deserialize DomainCreateResult");
+                    }
+
+                    return domainCreateResult;
+                }
+            }
+            catch (ApplicationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.CreateAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while creating domain: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<DomainContactsResult> GetContactsAsync(string domain, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                throw new ArgumentException("Domain cannot be null or empty", nameof(domain));
+            }
+
+            try
+            {
+                XDocument doc = await new Query(_params)
+                    .AddParameter("DomainName", domain)
+                    .ExecuteAsync("namecheap.domains.getContacts", cancellationToken)
+                    .ConfigureAwait(false);
+
+                XElement root = doc.Root;
+                if (root == null)
+                {
+                    throw new ApplicationException("Invalid response: Root element is null");
+                }
+
+                XElement commandResponse = root.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                XElement resultElement = commandResponse.Element(_ns + "DomainContactsResult");
+                if (resultElement == null)
+                {
+                    throw new ApplicationException("Invalid response structure: DomainContactsResult element not found");
+                }
+
+                XmlSerializer serializer = new XmlSerializer(typeof(DomainContactsResult), _ns.NamespaceName);
+                using (System.Xml.XmlReader reader = resultElement.CreateReader())
+                {
+                    object deserialized = serializer.Deserialize(reader);
+                    DomainContactsResult contactsResult = deserialized as DomainContactsResult;
+                    if (contactsResult == null)
+                    {
+                        throw new ApplicationException("Failed to deserialize DomainContactsResult");
+                    }
+
+                    return contactsResult;
+                }
+            }
+            catch (ApplicationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.GetContactsAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while getting contacts: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<DomainInfoResult> GetInfoAsync(string domain, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                throw new ArgumentException("Domain cannot be null or empty", nameof(domain));
+            }
+
+            try
+            {
+                XDocument doc = await new Query(_params)
+                    .AddParameter("DomainName", domain)
+                    .ExecuteAsync("namecheap.domains.getInfo", cancellationToken)
+                    .ConfigureAwait(false);
+
+                XElement root = doc.Root;
+                if (root == null)
+                {
+                    throw new ApplicationException("Invalid response: Root element is null");
+                }
+
+                XElement commandResponse = root.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                XElement infoResult = commandResponse.Element(_ns + "DomainGetInfoResult");
+                if (infoResult == null)
+                {
+                    throw new ApplicationException("Invalid response structure: DomainGetInfoResult element not found");
+                }
+
+                int id = 0;
+                bool isOwner = false;
+                XAttribute idAttr = infoResult.Attribute("ID");
+                XAttribute ownerNameAttr = infoResult.Attribute("OwnerName");
+                XAttribute isOwnerAttr = infoResult.Attribute("IsOwner");
+                XElement domainDetails = infoResult.Element(_ns + "DomainDetails");
+                XElement dnsDetails = infoResult.Element(_ns + "DnsDetails");
+
+                if (idAttr != null)
+                {
+                    int.TryParse(idAttr.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out id);
+                }
+
+                if (isOwnerAttr != null)
+                {
+                    bool.TryParse(isOwnerAttr.Value, out isOwner);
+                }
+
+                string ownerName = ownerNameAttr?.Value ?? string.Empty;
+
+                DateTime createdDate = DateTime.MinValue;
+                DateTime expiredDate = DateTime.MinValue;
+
+                if (domainDetails != null)
+                {
+                    XElement createdDateElement = domainDetails.Element(_ns + "CreatedDate");
+                    XElement expiredDateElement = domainDetails.Element(_ns + "ExpiredDate");
+                    if (createdDateElement != null)
+                    {
+                        createdDate = createdDateElement.Value.ParseNameCheapDate();
+                    }
+                    if (expiredDateElement != null)
+                    {
+                        expiredDate = expiredDateElement.Value.ParseNameCheapDate();
+                    }
+                }
+
+                string dnsProviderType = string.Empty;
+                if (dnsDetails != null)
+                {
+                    XAttribute providerTypeAttr = dnsDetails.Attribute("ProviderType");
+                    dnsProviderType = providerTypeAttr?.Value ?? string.Empty;
+                }
+
+                DomainInfoResult result = new DomainInfoResult()
+                {
+                    ID = id,
+                    OwnerName = ownerName,
+                    IsOwner = isOwner,
+                    CreatedDate = createdDate,
+                    ExpiredDate = expiredDate,
+                    DnsProviderType = dnsProviderType
+                };
+
+                return result;
+            }
+            catch (ApplicationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.GetInfoAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while getting domain info: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<DomainListResult> GetListAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                XDocument doc = await new Query(_params).ExecuteAsync("namecheap.domains.getList", cancellationToken).ConfigureAwait(false);
+                XElement root = doc.Root;
+                if (root == null)
+                {
+                    throw new ApplicationException("Invalid response: Root element is null");
+                }
+
+                XElement commandResponse = root.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                XmlSerializer serializer = new XmlSerializer(typeof(DomainListResult), _ns.NamespaceName);
+
+                using (System.Xml.XmlReader reader = commandResponse.CreateReader())
+                {
+                    object deserialized = serializer.Deserialize(reader);
+                    DomainListResult listResult = deserialized as DomainListResult;
+                    if (listResult == null)
+                    {
+                        throw new ApplicationException("Failed to deserialize DomainListResult");
+                    }
+
+                    return listResult;
+                }
+            }
+            catch (ApplicationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.GetListAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while getting domain list: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<bool> GetRegistrarLockAsync(string domain, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                throw new ArgumentException("Domain cannot be null or empty", nameof(domain));
+            }
+
+            try
+            {
+                XDocument doc = await new Query(_params)
+                    .AddParameter("DomainName", domain)
+                    .ExecuteAsync("namecheap.domains.getRegistrarLock", cancellationToken)
+                    .ConfigureAwait(false);
+
+                XElement root = doc.Root;
+                if (root == null)
+                {
+                    throw new ApplicationException("Invalid response: Root element is null");
+                }
+
+                XElement commandResponse = root.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                XElement resultElement = commandResponse.Element(_ns + "DomainGetRegistrarLockResult");
+                if (resultElement == null)
+                {
+                    throw new ApplicationException("Invalid response structure: DomainGetRegistrarLockResult element not found");
+                }
+
+                XAttribute statusAttr = resultElement.Attribute("RegistrarLockStatus");
+                bool status;
+                if (statusAttr == null || !bool.TryParse(statusAttr.Value, out status))
+                {
+                    throw new ApplicationException("Invalid or missing RegistrarLockStatus attribute");
+                }
+
+                return status;
+            }
+            catch (ApplicationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.GetRegistrarLockAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while getting registrar lock: {ex.Message}", ex);
+            }
+        }
+
+        public async Task SetRegistrarLockAsync(string domain, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                throw new ArgumentException("Domain cannot be null or empty", nameof(domain));
+            }
+
+            try
+            {
+                await new Query(_params)
+                    .AddParameter("DomainName", domain)
+                    .ExecuteAsync("namecheap.domains.setRegistrarLock", cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.SetRegistrarLockAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while setting registrar lock: {ex.Message}", ex);
+            }
+        }
+
+        public async Task SetRegistrarUnlockAsync(string domain, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                throw new ArgumentException("Domain cannot be null or empty", nameof(domain));
+            }
+
+            try
+            {
+                await new Query(_params)
+                    .AddParameter("DomainName", domain)
+                    .AddParameter("LockAction", "UNLOCK")
+                    .ExecuteAsync("namecheap.domains.setRegistrarLock", cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.SetRegistrarUnlockAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while unlocking registrar lock: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<TldListResult> GetTldListAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                XDocument doc = await new Query(_params).ExecuteAsync("namecheap.domains.getTldList", cancellationToken).ConfigureAwait(false);
+                XElement root = doc.Root;
+                if (root == null)
+                {
+                    throw new ApplicationException("Invalid response: Root element is null");
+                }
+
+                XElement commandResponse = root.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                XElement tldsElement = commandResponse.Element(_ns + "Tlds");
+                if (tldsElement == null)
+                {
+                    throw new ApplicationException("Invalid response structure: Tlds element not found");
+                }
+
+                XmlSerializer serializer = new XmlSerializer(typeof(TldListResult), _ns.NamespaceName);
+
+                using (System.Xml.XmlReader reader = tldsElement.CreateReader())
+                {
+                    object deserialized = serializer.Deserialize(reader);
+                    TldListResult tldsResult = deserialized as TldListResult;
+                    if (tldsResult == null)
+                    {
+                        throw new ApplicationException("Failed to deserialize TldListResult");
+                    }
+
+                    return tldsResult;
+                }
+            }
+            catch (ApplicationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.GetTldListAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while getting TLD list: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<DomainRenewResult> RenewAsync(string domain, int years, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                throw new ArgumentException("Domain cannot be null or empty", nameof(domain));
+            }
+            if (years <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(years), "Years must be greater than zero");
+            }
+
+            try
+            {
+                XDocument doc = await new Query(_params)
+                 .AddParameter("DomainName", domain)
+                 .AddParameter("Years", years.ToString(CultureInfo.InvariantCulture))
+                 .ExecuteAsync("namecheap.domains.renew", cancellationToken)
+                 .ConfigureAwait(false);
+
+                XElement root = doc.Root;
+                if (root == null)
+                {
+                    throw new ApplicationException("Invalid response: Root element is null");
+                }
+
+                XElement commandResponse = root.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                XElement resultElement = commandResponse.Element(_ns + "DomainRenewResult");
+                if (resultElement == null)
+                {
+                    throw new ApplicationException("Invalid response structure: DomainRenewResult element not found");
+                }
+
+                XmlSerializer serializer = new XmlSerializer(typeof(DomainRenewResult), _ns.NamespaceName);
+
+                using (System.Xml.XmlReader reader = resultElement.CreateReader())
+                {
+                    object deserialized = serializer.Deserialize(reader);
+                    DomainRenewResult renewResult = deserialized as DomainRenewResult;
+                    if (renewResult == null)
+                    {
+                        throw new ApplicationException("Failed to deserialize DomainRenewResult");
+                    }
+
+                    return renewResult;
+                }
+            }
+            catch (ApplicationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.RenewAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while renewing domain: {ex.Message}", ex);
+            }
+        }
+
+        public async Task<DomainReactivateResult> ReactivateAsync(string domain, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                throw new ArgumentException("Domain cannot be null or empty", nameof(domain));
+            }
+
+            try
+            {
+                XDocument doc = await new Query(_params)
+                 .AddParameter("DomainName", domain)
+                 .ExecuteAsync("namecheap.domains.reActivate", cancellationToken)
+                 .ConfigureAwait(false);
+
+                XElement root = doc.Root;
+                if (root == null)
+                {
+                    throw new ApplicationException("Invalid response: Root element is null");
+                }
+
+                XElement commandResponse = root.Element(_ns + "CommandResponse");
+                if (commandResponse == null)
+                {
+                    throw new ApplicationException("Invalid response structure: CommandResponse element not found");
+                }
+
+                XElement resultElement = commandResponse.Element(_ns + "DomainReactivateResult");
+                if (resultElement == null)
+                {
+                    throw new ApplicationException("Invalid response structure: DomainReactivateResult element not found");
+                }
+
+                XmlSerializer serializer = new XmlSerializer(typeof(DomainReactivateResult), _ns.NamespaceName);
+
+                using (System.Xml.XmlReader reader = resultElement.CreateReader())
+                {
+                    object deserialized = serializer.Deserialize(reader);
+                    DomainReactivateResult reactivateResult = deserialized as DomainReactivateResult;
+                    if (reactivateResult == null)
+                    {
+                        throw new ApplicationException("Failed to deserialize DomainReactivateResult");
+                    }
+
+                    return reactivateResult;
+                }
+            }
+            catch (ApplicationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.ReactivateAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while reactivating domain: {ex.Message}", ex);
+            }
+        }
+
+        public async Task SetContactsAsync(DomainContactsRequest contacts, CancellationToken cancellationToken = default)
+        {
+            if (contacts == null)
+            {
+                throw new ArgumentNullException(nameof(contacts));
+            }
+
+            try
+            {
+                Query query = new Query(_params);
+
+                foreach (KeyValuePair<string, string> item in GetNamesAndValuesFromProperties(contacts))
+                {
+                    query.AddParameter(item.Key, item.Value);
+                }
+
+                await query.ExecuteAsync("namecheap.domains.setContacts", cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"DomainsApi.SetContactsAsync: EXCEPTION: {ex.Message}");
+                throw new ApplicationException($"Unexpected error while setting contacts: {ex.Message}", ex);
+            }
         }
     }
 }
