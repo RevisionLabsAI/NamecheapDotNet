@@ -76,6 +76,14 @@ namespace NameCheap
                     throw new ApplicationException("Invalid response structure: CommandResponse element not found");
                 }
 
+                // Capture global warnings
+                var warnings = doc.Root?.Element(_ns + "Warnings");
+                if (warnings != null && warnings.Elements().Any())
+                {
+                    string warningText = string.Join("; ", warnings.Elements().Select(w => w.Value));
+                    Console.WriteLine($"NameCheap API Warning: {warningText}");
+                }
+
                 return commandResponse.Elements()
                     .Select(ParseDomainCheckResult)
                     .Where(result => result != null)
@@ -108,7 +116,8 @@ namespace NameCheap
                     IsAvailable = GetBooleanAttributeValue(element, "Available"),
                     IsPremiumName = GetBooleanAttributeValue(element, "IsPremiumName"),
                     IcannFee = GetDoubleAttributeValue(element, "IcannFee"),
-                    PremiumRegistrationPrice = GetDoubleAttributeValue(element, "PremiumRegistrationPrice")
+                    PremiumRegistrationPrice = GetDoubleAttributeValue(element, "PremiumRegistrationPrice"),
+                    Message = GetAttributeValue(element, "ErrorNo") != "0" ? GetAttributeValue(element, "Description") : null
                 };
             }
             catch (Exception ex)
