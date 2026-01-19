@@ -84,6 +84,14 @@ namespace NameCheap
                     Console.WriteLine($"NameCheap API Warning: {warningText}");
                 }
 
+                // Capture errors in CommandResponse (if any, though usually they are in Errors)
+                var errors = doc.Root?.Element(_ns + "Errors");
+                if (errors != null && errors.Elements().Any())
+                {
+                    string errorText = string.Join("; ", errors.Elements().Select(e => $"[{e.Attribute("Number")?.Value}] {e.Value}"));
+                    Console.WriteLine($"NameCheap API Error: {errorText}");
+                }
+
                 return commandResponse.Elements()
                     .Select(ParseDomainCheckResult)
                     .Where(result => result != null)
@@ -101,13 +109,15 @@ namespace NameCheap
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"DomainsApi.AreAvailableAsync: EXCEPTION: {ex.Message}");
+                Console.WriteLine($"DomainsApi.AreAvailableAsync: EXCEPTION: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
                 throw new ApplicationException($"Unexpected error checking domain availability: {ex.Message}", ex);
             }
         }
 
         private DomainCheckResult ParseDomainCheckResult(XElement element)
         {
+            if (element == null) return null;
+
             try
             {
                 return new DomainCheckResult()
