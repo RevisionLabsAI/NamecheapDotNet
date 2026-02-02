@@ -8,7 +8,7 @@
         /// <summary>
         /// Gets or sets the domain name.
         /// </summary>
-        public string DomainName { get; set; }
+        public string DomainName { get; set; } = string.Empty;
 
         /// <summary>
         /// Gets or sets a value indicating whether the domain is available.
