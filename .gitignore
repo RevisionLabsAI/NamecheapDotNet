@@ -6,6 +6,10 @@
 *.user
 *.sln.docstates
 
+# Local configuration files
+*.local.json
+*.Local.json
+
 # Build results
 [Dd]ebug/
 [Rr]elease/
