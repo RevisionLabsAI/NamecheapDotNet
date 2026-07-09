@@ -63,3 +63,6 @@ stylecop.*
 ~$*
 *.dbmdl
 .vs/
+
+# macOS
+.DS_Store
