@@ -127,6 +127,16 @@ namespace NameCheap
                     IsPremiumName = GetBooleanAttributeValue(element, "IsPremiumName"),
                     IcannFee = GetDoubleAttributeValue(element, "IcannFee"),
                     PremiumRegistrationPrice = GetDoubleAttributeValue(element, "PremiumRegistrationPrice"),
+                    // A premium name renews at its own price, not the TLD's standard renewal price.
+                    // Namecheap returns these alongside the registration price on every check; not
+                    // reading them meant a premium name silently renewed at the standard rate.
+                    PremiumRenewalPrice = GetDoubleAttributeValue(element, "PremiumRenewalPrice"),
+                    PremiumTransferPrice = GetDoubleAttributeValue(element, "PremiumTransferPrice"),
+                    PremiumRestorePrice = GetDoubleAttributeValue(element, "PremiumRestorePrice"),
+                    // Namecheap quotes in the account currency and does not repeat it per result;
+                    // null lets the caller apply its own billing-currency assumption explicitly
+                    // rather than this layer inventing one.
+                    PremiumCurrency = null,
                     Message = GetAttributeValue(element, "ErrorNo") != "0" ? GetAttributeValue(element, "Description") : null
                 };
             }
